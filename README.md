@@ -24,13 +24,15 @@ python serve.py 8080
   F.FWD = próxima faixa.
 - **Switch AFTER SHUTTLE**: `RESUME` (padrão) — ao soltar o shuttle a música **continua
   tocando do ponto**; `HOLD` — fica pausada e você aperta PLAY.
-- LEDs: POWER, PLAY, REW, F.FWD, REC, PEAK +3dB, LOOP — cada um acende conforme a ação.
+- LEDs: POWER, PLAY, PAUSE, REW, F.FWD, REC, PEAK +3dB, LOOP — cada um acende conforme a
+  ação (**PAUSE** acende quando o botão de pause é pressionado durante a reprodução).
 - **VUs analógicos estéreo** com balística real (ataque rápido / release lento), zona
   vermelha 0…+3 dB, arco de % de modulação e LED de PEAK com hold.
 - **VU dedicado MIC INPUT** no painel de gravação: mostra a captação do microfone
   enquanto grava (STANDBY fora da gravação).
-- Janela de fita animada: carretéis com velocidade linear constante (o pacote de fita
-  muda de raio com o progresso), 3 cabeças, capstan, contador mecânico de 3 dígitos.
+- Janela de fita animada: carretéis girando no **sentido anti-horário** no PLAY (fita da
+  esquerda para a direita) com velocidade linear constante (o pacote de fita muda de raio
+  com o progresso), 3 cabeças, capstan, contador mecânico de 3 dígitos.
 - **Nomes longos**: o título da fita faz **marquee** no LCD e na label da fita, sem
   quebrar o layout.
 
@@ -48,6 +50,8 @@ python serve.py 8080
 - **Reordenação manual**: arraste as faixas com o mouse (no toque, pressione ~0,2 s e arraste).
 - Botão **🔀 (símbolo universal de shuffle)** embaralha a lista na hora, mantendo a faixa
   atual selecionada.
+- Botão **↩ (restaurar)**, ao lado do shuffle, devolve a lista à **ordem original** —
+  desfaz embaralhamentos e arrastos, inclusive entre sessões.
 - **Importar .m3u8/.json** pelo próprio ADD FILES: faixas não localizadas aparecem em
   **vermelho** com botão **LOCALIZAR** para reapontar o arquivo que mudou de lugar.
 
@@ -107,6 +111,7 @@ deck.loadSaved(id, skipConfirm)
 deck.toM3u(tracks, nome)       // gera o conteúdo .m3u8
 deck.loadPlaylistFile(File)    // carrega .m3u8/.m3u/.json como playlist
 deck.shuffle()                 // embaralha a lista (mantém faixa atual)
+deck.resetOrder()              // volta à ordem original (desfaz shuffle/arrastos)
 deck.vu / deck.micVu           // níveis em dB
 deck.state / deck.storageOK
 ```

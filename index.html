@@ -561,6 +561,7 @@ body{
       <div class="ledstrip" id="leds">
         <div class="led g" id="ledPwr"><div class="bulb"></div><span class="cap">POWER</span></div>
         <div class="led g" id="ledPlay"><div class="bulb"></div><span class="cap">PLAY</span></div>
+        <div class="led a" id="ledPause"><div class="bulb"></div><span class="cap">PAUSE</span></div>
         <div class="led b" id="ledRew"><div class="bulb"></div><span class="cap">REW</span></div>
         <div class="led a" id="ledFf"><div class="bulb"></div><span class="cap">F.FWD</span></div>
         <div class="led r" id="ledRec"><div class="bulb"></div><span class="cap">REC</span></div>
@@ -653,6 +654,9 @@ body{
           <button class="pbtn ico" id="btnShuffle" title="Embaralhar playlist" aria-label="Embaralhar playlist">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.59 9.17 5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
           </button>
+          <button class="pbtn ico" id="btnResetOrder" title="Voltar à ordem original" aria-label="Restaurar ordem original">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+          </button>
           <button class="pbtn danger" id="btnClear">Clear</button>
         </span>
       </h2>
@@ -732,6 +736,7 @@ const uid = ()=> Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 const state = {
   power:true, mode:'stop',          // stop | play | rew | ff
+  paused:false, origOrder:[],      // PAUSE led + ordem original p/ reset
   playlist:[], cur:-1, loop:false,
   recording:false, recWithMusic:true, monitor:false,
   volume:0.75, micGain:0.8, tone:0.5, bal:0.5, mono:false,
@@ -884,9 +889,11 @@ function ingest(items){
           }
           for(const e of entries){
             const hit = (e.path && libP.get(String(e.path).toLowerCase())) || lib.get(e.name);
-            state.playlist.push(hit
+            const tr = hit
               ? mkTrack(e.name, (e.dur!=null?e.dur:hit.dur), e.kind||hit.kind||'file', hit.blob, e.path||hit.path||null)
-              : mkTrack(e.name, e.dur, e.kind||'file', null, e.path||null));
+              : mkTrack(e.name, e.dur, e.kind||'file', null, e.path||null);
+            state.playlist.push(tr);
+            state.origOrder.push(tr.id);
             added++;
           }
         }catch(err){ stMsg('Não foi possível ler a playlist: '+err.message); }
@@ -895,6 +902,7 @@ function ingest(items){
       if(!f.type.startsWith('audio') && !/\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|webm|mp4)$/i.test(f.name)) continue;
       const t = mkTrack(cleanName(f.name), NaN, 'file', f, (it.path && it.path.indexOf('/')>0) ? String(it.path).replace(/\\/g,'/') : null);
       state.playlist.push(t);
+      state.origOrder.push(t.id);
       putFile(t); probe(t); added++;
     }
     if(added){
@@ -987,6 +995,7 @@ function select(i, autoplay){
   state.time=0; state.progress=0; state.dur=t.dur||0;
   lastCap=null; updateReadout();
   renderPlaylist();
+  if(state.paused){ state.paused=false; setLeds(); }
   updateMediaSession(); syncPlaybackState(); msPos();
   if(autoplay) play();
 }
@@ -1207,6 +1216,7 @@ async function loadPlaylistFile(f){
     return mkTrack(e.name, dur, e.kind || (hit && hit.kind) || 'file', hit ? hit.blob : null, e.path || (hit && hit.path) || null);
   });
   state.cur=-1;
+  state.origOrder = state.playlist.map(t=>t.id);
   renderPlaylist();
   const first=nextPlayable(0);
   if(first>=0) select(first,false); else { lastCap=null; updateReadout(); }
@@ -1243,11 +1253,11 @@ async function play(){
   const t=state.playlist[state.cur];
   if(t && t.missing){ locate(state.cur, true); return; }
   ensureAudio();
-  try{ await au.play(); state.mode='play'; setLeds(); syncPlaybackState(); msPos(); }
+  try{ await au.play(); state.mode='play'; state.paused=false; setLeds(); syncPlaybackState(); msPos(); }
   catch(e){ setLCaption('⚠ '+e.message); lastCap='err'; }
 }
-function pause(){ if(au){ au.pause(); } state.mode='stop'; setLeds(); syncPlaybackState(); }
-function stopAll(){ if(au){ au.pause(); au.currentTime=0; } state.mode='stop'; state.progress=0; state.time=0; setLeds(); syncPlaybackState(); updateReadout(); }
+function pause(){ const was = state.mode==='play'; if(au){ au.pause(); } state.mode='stop'; if(was) state.paused=true; setLeds(); syncPlaybackState(); }
+function stopAll(){ if(au){ au.pause(); au.currentTime=0; } state.mode='stop'; state.paused=false; state.progress=0; state.time=0; setLeds(); syncPlaybackState(); updateReadout(); }
 
 /* shuttle (REW / F.FWD hold) — com retomada opcional */
 function shuttle(dir){
@@ -1270,11 +1280,12 @@ function shuttleRelease(){
 }
 
 /* ---------------- LEDs ---------------- */
-const L = {pwr:$('#ledPwr'), play:$('#ledPlay'), rew:$('#ledRew'), ff:$('#ledFf'),
+const L = {pwr:$('#ledPwr'), play:$('#ledPlay'), pause:$('#ledPause'), rew:$('#ledRew'), ff:$('#ledFf'),
            rec:$('#ledRec'), peak:$('#ledPeak'), loop:$('#ledLoop')};
 function setLeds(){
   L.pwr.classList.toggle('on', state.power);
   L.play.classList.toggle('on', state.power && state.mode==='play');
+  L.pause.classList.toggle('on', state.power && !!state.paused);
   L.rew.classList.toggle('on',  state.power && state.mode==='rew');
   L.ff.classList.toggle('on',   state.power && state.mode==='ff');
   L.rec.classList.toggle('on',  state.power && state.recording);
@@ -1404,7 +1415,7 @@ $('#btnClear').onclick = ()=>{
   if(!confirm('Limpar toda a playlist? (arquivos salvos em playlists permanecem disponíveis)')) return;
   stopAll();
   state.playlist.forEach(t=>{ if(t.url) URL.revokeObjectURL(t.url); });
-  state.playlist=[]; state.cur=-1;
+  state.playlist=[]; state.cur=-1; state.origOrder=[];
   renderPlaylist(); lastCap=null; updateReadout(); scheduleSave();
 };
 let dragN=0;
@@ -1428,6 +1439,25 @@ function shufflePlaylist(){
   renderPlaylist(); lastCap=null; updateReadout(); scheduleSave();
 }
 $('#btnShuffle').onclick = shufflePlaylist;
+
+/* restaura a ordem original (desfaz shuffle/arrastos — vale entre sessões) */
+function resetOrder(){
+  const n=state.playlist.length;
+  if(n<2){ savedMsg('Playlist muito curta para resetar.'); return; }
+  const curT = state.cur>=0 ? state.playlist[state.cur] : null;
+  const idx=new Map();
+  state.origOrder.forEach((id,i)=>{ if(!idx.has(id)) idx.set(id,i); });
+  /* faixas sem registro na original (adicionadas depois) mantêm a ordem atual, no fim */
+  const keyed = state.playlist.map((t,i)=>({t, o: idx.has(t.id) ? idx.get(t.id) : 1e6+i}));
+  const already = keyed.every((k,i)=> i===0 || keyed[i-1].o <= k.o);
+  if(already){ savedMsg('Playlist já está na ordem original.'); return; }
+  keyed.sort((a,b)=>a.o-b.o);
+  state.playlist = keyed.map(k=>k.t);
+  state.cur = curT ? state.playlist.indexOf(curT) : -1;
+  renderPlaylist(); lastCap=null; updateReadout(); scheduleSave();
+  savedMsg('Ordem original restaurada', true);
+}
+$('#btnResetOrder').onclick = resetOrder;
 
 /* arrastar linhas da playlist — Pointer Events (mouse + toque:
    no toque o arrasto começa após ~220ms de pressão, sem roubar a rolagem) */
@@ -1638,6 +1668,7 @@ function onRecStop(){
   const t = mkTrack(name, secs, 'rec', recBlob);
   ensureAudio();
   state.playlist.push(t);
+  state.origOrder.push(t.id);
   putFile(t);
   renderPlaylist(); scheduleSave();
 
@@ -1747,6 +1778,23 @@ function putFile(t){
     .catch(err=>{ storageOK=false;
       stMsg('Armazenamento local indisponível/cheio ('+(err&&err.name)+'). Abra via http://localhost ou libere espaço. '); });
 }
+/* snapshot da ordem original (ids -> chave nome+caminho, persistível) */
+function origSnapshot(){
+  const m=new Map(state.playlist.map(t=>[t.id,t]));
+  return state.origOrder.map(id=>{ const t=m.get(id); return t ? {n:t.name, p:t.path||null} : null; })
+    .filter(Boolean);
+}
+function applyOrigSnapshot(arr){
+  const key=o=>((o.p||'')+'|'+o.n);
+  const cur=new Map(state.playlist.map(t=>[key({n:t.name, p:t.path}), t.id]));
+  const seen=new Set();
+  state.origOrder=[];
+  (arr||[]).forEach(o=>{
+    const id=cur.get(key(o));
+    if(id!=null && !seen.has(id)){ seen.add(id); state.origOrder.push(id); }
+  });
+  state.playlist.forEach(t=>{ if(!seen.has(t.id)){ seen.add(t.id); state.origOrder.push(t.id); } });
+}
 let saveT=null;
 function scheduleSave(){ clearTimeout(saveT); saveT=setTimeout(saveState, 450); }
 async function saveState(){
@@ -1754,6 +1802,7 @@ async function saveState(){
   try{
     await dbPut('kv', {k:'state', cur:state.cur,
       order: state.playlist.map(t=>({name:t.name, kind:t.kind, path:t.path||null, dur:(t.dur!=null&&isFinite(t.dur)?t.dur:null)})),
+      orig: origSnapshot(),
       settings:{loop:state.loop, resumeAfter:state.resumeAfter, recWithMusic:state.recWithMusic,
                 monitor:state.monitor, volume:state.volume, micGain:state.micGain, tone:state.tone,
                 bal:state.bal, mono:state.mono}});
@@ -1791,6 +1840,7 @@ async function restore(){
         return f ? mkTrack(o.name, dur, o.kind, f.blob, path) : mkTrack(o.name, dur, o.kind, null, path);
       });
       state.cur = clamp(kv.cur!=null?kv.cur:0, 0, state.playlist.length-1);
+      applyOrigSnapshot(kv.orig);
       const s = kv.settings||{};
       if(s.loop!==undefined) swLoop.set(!!s.loop);
       if(s.resumeAfter!==undefined) swShut.set(!!s.resumeAfter);
@@ -1893,6 +1943,7 @@ async function loadSaved(id, skipConfirm){
     return f ? mkTrack(t.name, dur, t.kind, f.blob, path) : mkTrack(t.name, dur, t.kind, null, path);
   });
   state.cur = -1;
+  state.origOrder = state.playlist.map(t=>t.id);
   renderPlaylist();
   const first = nextPlayable(0);
   if(first>=0) select(first,false); else { lastCap=null; updateReadout(); }
@@ -2353,13 +2404,13 @@ function frame(now){
   state.rT = Math.sqrt(rMin*rMin + state.progress*(rMax*rMax-rMin*rMin));
   if(state.power){
     if(state.mode==='play'){
-      const w = (dt*2.4)/Math.max(state.rL,1)*rMax;      /* same linear speed */
-      reelAng[0] += w;
-      reelAng[1] += (dt*2.4)/Math.max(state.rT,1)*rMax;
+      const w = (dt*2.4)/Math.max(state.rL,1)*rMax;      /* mesma velocidade linear */
+      reelAng[0] -= w;                                   /* anti-horário (fita esq→dir) */
+      reelAng[1] -= (dt*2.4)/Math.max(state.rT,1)*rMax;
     } else if(state.mode==='rew' || state.mode==='ff'){
       const dir = state.mode==='rew'?-1:1;
-      reelAng[0] += dir*dt*13;
-      reelAng[1] += dir*dt*13;
+      reelAng[0] -= dir*dt*13;
+      reelAng[1] -= dir*dt*13;
     }
   } else { reelAng[0]=0; reelAng[1]=0; }
 
@@ -2418,6 +2469,7 @@ window.deck = {
   select, rec:startRec, stopRec, locate,
   savePlaylist: doSave, loadSaved, downloadPlaylist, toM3u, loadPlaylistFile, bindLibDir,
   shuffle: shufflePlaylist,
+  resetOrder: resetOrder,
   get vu(){ return vuVal.slice(); },
   get micVu(){ return micVu; },
   get time(){ return state.time; },
